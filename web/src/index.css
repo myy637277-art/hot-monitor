@@ -1,0 +1,88 @@
+@import "@fontsource-variable/ibm-plex-sans/wght.css";
+@import "@fontsource-variable/jetbrains-mono";
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #0f1923;
+  --color-ink-2: #141f29;
+  --color-panel: #1f2731;
+  --color-panel-2: #26313c;
+  --color-line: rgb(236 232 225 / 0.14);
+  --color-line-strong: rgb(236 232 225 / 0.28);
+  --color-accent: #ff4655;
+  /* Lighter red for small text: #ff4655 is only 4.49:1 on panel, this is 5.17:1. */
+  --color-accent-text: #ff6170;
+  --color-bone: #ece8e1;
+  --color-muted: #a9b0b6;
+  --color-ok: #17e5c9;
+  --color-warn: #f5b83d;
+
+  --font-display: "IBM Plex Sans Variable", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+  --font-sans: "IBM Plex Sans Variable", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Mono", monospace;
+
+  --animate-blink: blink 1.6s ease-in-out infinite;
+
+  @keyframes blink {
+    50% {
+      opacity: 0.35;
+    }
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    /* Keeps focused elements clear of the sticky mobile header. */
+    scroll-padding-top: 5rem;
+    scroll-padding-bottom: 5.5rem;
+  }
+  body {
+    @apply bg-ink font-sans text-bone antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-ok);
+    outline-offset: 3px;
+  }
+}
+
+@layer components {
+  .hud-frame {
+    border: 1px solid var(--color-line-strong);
+    background: var(--color-panel);
+  }
+  .hud-body {
+    height: 100%;
+  }
+  .title-cut {
+    display: block;
+    width: 2.5rem;
+    height: 3px;
+    margin-top: 0.45rem;
+    background: var(--color-accent);
+    clip-path: polygon(0 0, 100% 0, calc(100% - 7px) 100%, 0 100%);
+  }
+  /* Original shipped story card: clipped top-right corner, 1px frame. */
+  .story-card {
+    --cut: 16px;
+    padding: 1px;
+    background: var(--color-line-strong);
+    clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, 0 100%);
+  }
+  .story-card-body {
+    height: 100%;
+    background: var(--color-panel);
+    clip-path: polygon(0 0, calc(100% - var(--cut) + 0.5px) 0, 100% calc(var(--cut) - 0.5px), 100% 100%, 0 100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

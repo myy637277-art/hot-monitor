@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+<entry>
+<title>A paper about retrieval</title>
+<link href="https://arxiv.org/abs/2610.12345"/>
+<summary>We study retrieval.</summary>
+<published>2026-10-26T00:00:00Z</published>
+</entry>
+</feed>

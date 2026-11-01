@@ -1,0 +1,38 @@
+[
+  {
+    "name": "passing-mention",
+    "keyword": "claude",
+    "title": "周末餐厅推荐",
+    "text": "店里的播客顺带聊到 Claude，主菜是烤鱼。",
+    "urls": ["https://www.qbitai.com/restaurant"],
+    "relevant": false,
+    "authentic": true
+  },
+  {
+    "name": "on-topic",
+    "keyword": "claude",
+    "title": "Claude 新模型发布",
+    "text": "量子位报道 Anthropic 发布 Claude 的新模型。",
+    "urls": ["https://www.qbitai.com/claude"],
+    "relevant": true,
+    "authentic": true
+  },
+  {
+    "name": "lookalike",
+    "keyword": "openai",
+    "title": "OpenAI 发放福利",
+    "text": "点击免费领取内部额度。",
+    "urls": ["https://news-openai.com/gift"],
+    "relevant": true,
+    "authentic": false
+  },
+  {
+    "name": "official",
+    "keyword": "openai",
+    "title": "OpenAI 更新 Model Spec",
+    "text": "OpenAI 官方博客介绍引导模型的五项价值。",
+    "urls": ["https://openai.com/news/model-spec"],
+    "relevant": true,
+    "authentic": true
+  }
+]
