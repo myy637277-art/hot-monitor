@@ -6,10 +6,12 @@ export function crawlerUa(contact: string | undefined): string {
   return `myy-hot-monitor/0.1 (personal research; contact: ${who})`;
 }
 
+const MAX_BODY = 2 * 1024 * 1024;
+
 export class HttpError extends Error {
   constructor(
     message: string,
-    readonly kind: 'timeout' | 'network',
+    readonly kind: 'timeout' | 'network' | 'too_large' | 'aborted',
   ) {
     super(message);
     this.name = 'HttpError';
@@ -18,6 +20,14 @@ export class HttpError extends Error {
 
 export function isTimeout(err: unknown): boolean {
   return err instanceof HttpError && err.kind === 'timeout';
+}
+
+export function isAbort(err: unknown): boolean {
+  return err instanceof HttpError && err.kind === 'aborted';
+}
+
+export function isTooLarge(err: unknown): boolean {
+  return err instanceof HttpError && err.kind === 'too_large';
 }
 
 function visibleHead(body: string): string {
@@ -44,10 +54,12 @@ function charsetOf(header: string, buf: Buffer): string {
 export async function fetchUrl(
   doFetch: typeof fetch,
   url: string,
-  opts: { timeoutMs: number; ua: string; headers?: Record<string, string> },
+  opts: { timeoutMs: number; ua: string; headers?: Record<string, string>; signal?: AbortSignal },
 ): Promise<{ status: number; ok: boolean; body: string }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs);
+  const onExternal = () => ctrl.abort();
+  opts.signal?.addEventListener('abort', onExternal, { once: true });
   try {
     const res = await doFetch(url, {
       signal: ctrl.signal,
@@ -58,7 +70,7 @@ export async function fetchUrl(
         ...opts.headers,
       },
     });
-    const buf = Buffer.from(await res.arrayBuffer());
+    const buf = await readBody(res);
     let body: string;
     try {
       body = new TextDecoder(charsetOf(res.headers.get('content-type') ?? '', buf)).decode(buf);
@@ -67,10 +79,35 @@ export async function fetchUrl(
     }
     return { status: res.status, ok: res.ok, body };
   } catch (err) {
+    if (err instanceof HttpError) throw err;
+    if (opts.signal?.aborted) throw new HttpError('aborted', 'aborted');
     const name = err instanceof Error ? err.name : '';
     if (name === 'AbortError' || ctrl.signal.aborted) throw new HttpError('timeout', 'timeout');
     throw new HttpError(err instanceof Error ? err.message : 'network', 'network');
   } finally {
     clearTimeout(timer);
+    opts.signal?.removeEventListener('abort', onExternal);
   }
+}
+
+async function readBody(res: Response): Promise<Buffer> {
+  const reader = res.body?.getReader();
+  if (!reader) {
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > MAX_BODY) throw new HttpError('响应过大', 'too_large');
+    return buf;
+  }
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_BODY) {
+      await reader.cancel().catch(() => undefined);
+      throw new HttpError('响应过大', 'too_large');
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
 }

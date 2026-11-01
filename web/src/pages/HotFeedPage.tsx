@@ -7,6 +7,7 @@ import { Meter } from '../components/ui/Meter.tsx';
 import { PageHeader } from '../components/ui/PageHeader.tsx';
 import { httpUrl, rulesBadge, StorySourceLink, StoryTitleLink } from '../components/story-link.tsx';
 import { collectStatus, useCollect, useSources, useStories } from '../lib/feed.ts';
+import { asFeedSort, asVerdictFilter, orderHomepage, type FeedSort, type VerdictFilter } from '../lib/feed-view.ts';
 import { fmtDateTime, type HealthState } from '../lib/useHealth.ts';
 
 function BackendStatus({
@@ -76,10 +77,13 @@ export function HotFeedPage() {
   const stories = useStories();
   const collect = useCollect();
   const [showAll, setShowAll] = useState(false);
+  const [sort, setSort] = useState<FeedSort>('composite');
+  const [verdict, setVerdict] = useState<VerdictFilter>('all');
   const collecting = collect.isPending || Boolean(sources.data?.running);
   const status = collectStatus(Boolean(sources.data?.running), sources.data?.progress);
 
   const list = stories.data?.stories ?? null;
+  const view = list ? orderHomepage(list, sort, verdict) : null;
   const sourceList = sources.data?.sources ?? null;
   const trouble = sourceList
     ? sourceList.filter((source) => source.status === 'error' || source.status === 'paused' || source.status === 'skipped').length
@@ -148,9 +152,43 @@ export function HotFeedPage() {
         <p className="text-sm text-muted">近 7 天里没有可放上首页的故事。没有发布时间的条目、微博和 B 站都不会出现在这里。</p>
       )}
       {list && list.length > 0 && (
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row">
+          <label className="text-sm">
+            <span className="mb-1 block text-muted">排序</span>
+            <select
+              value={sort}
+              onChange={(event) => setSort(asFeedSort(event.target.value))}
+              className="min-h-11 border border-line bg-ink px-3 text-bone"
+            >
+              <option value="composite">综合</option>
+              <option value="credibility">可信度</option>
+              <option value="strength">来源强弱</option>
+              <option value="hotness">热度</option>
+              <option value="newest">最新发布</option>
+            </select>
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-muted">判定</span>
+            <select
+              value={verdict}
+              onChange={(event) => setVerdict(asVerdictFilter(event.target.value))}
+              className="min-h-11 border border-line bg-ink px-3 text-bone"
+            >
+              <option value="all">全部</option>
+              <option value="reliable">可靠</option>
+              <option value="uncertain">存疑</option>
+              <option value="unverified">未核实</option>
+            </select>
+          </label>
+        </div>
+      )}
+      {list && list.length > 0 && view && view.length === 0 && (
+        <p className="text-sm text-muted">这个判定下没有故事。</p>
+      )}
+      {view && view.length > 0 && (
         <>
           <ul className="space-y-3">
-              {(showAll ? list : list.slice(0, HOME_PREVIEW)).map((story) => {
+              {(showAll ? view : view.slice(0, HOME_PREVIEW)).map((story) => {
                 const href = story.sources.map((source) => httpUrl(source.url)).find((url) => url != null) ?? null;
                 const rules = rulesBadge(story.aiMode, story.credibilityReason);
                 const headline = story.eventTitle ?? story.title;
@@ -188,10 +226,10 @@ export function HotFeedPage() {
                 );
               })}
             </ul>
-            {!showAll && list.length > HOME_PREVIEW && (
+            {!showAll && view.length > HOME_PREVIEW && (
               <div className="mt-4">
                 <Button variant="ghost" onClick={() => setShowAll(true)}>
-                  更多 · {list.length - HOME_PREVIEW}
+                  更多 · {view.length - HOME_PREVIEW}
                 </Button>
               </div>
             )}

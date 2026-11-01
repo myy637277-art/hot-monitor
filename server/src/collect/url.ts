@@ -47,7 +47,7 @@ export function twitterIdFromUrl(raw: string): string | null {
 export function biliIdFromUrl(raw: string): string | null {
   try {
     const url = new URL(raw);
-    if (!/(^|\.)bilibili\.com$/i.test(url.hostname) && !url.pathname.includes('/video/')) return null;
+    if (!/(^|\.)bilibili\.com$/i.test(url.hostname)) return null;
     return url.pathname.match(/BV[0-9A-Za-z]{10}/)?.[0] ?? null;
   } catch {
     return null;

@@ -39,6 +39,9 @@ describe('homepage window', () => {
     expect(ids).not.toContain('search-off');
     expect(ids).not.toContain('hn-alone');
     expect(cards.every((card) => card.unverified)).toBe(true);
+    expect(cards.every((card) => card.feedVerdict == null)).toBe(true);
+    expect(cards.find((card) => card.id === 'fresh')?.sourceStrength).toBe(1);
+    expect(cards.find((card) => card.id === 'tweet')?.sourceStrength).toBe(0);
     expect(cards.some((card) => card.sources.some((source) => source.type === 'weibo_hot' || source.type === 'bili_hot'))).toBe(false);
   });
 
@@ -96,6 +99,8 @@ describe('homepage judgment', () => {
     const [card] = listHomepage(db, 10, now, true);
     expect(card?.eventTitle).toBe('量子位报道新模型发布');
     expect(card?.feedReason).toBe('量子位有原文');
+    expect(card?.feedVerdict).toBe('reliable');
+    expect(card?.sourceStrength).toBe(1);
     expect(card?.unverified).toBe(false);
   });
 
@@ -114,6 +119,7 @@ describe('homepage judgment', () => {
     expect(calls).toBe(1);
     const [card] = listHomepage(db, 10, now, true);
     expect(card?.unverified).toBe(false);
+    expect(card?.feedVerdict).toBe('uncertain');
     expect(card?.eventTitle).toBe('量子位提到一项新研究');
   });
 });

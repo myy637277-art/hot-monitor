@@ -14,6 +14,7 @@ export function openDb(file: string): { db: Db; close: () => void } {
   if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
   const sqlite = new Database(file);
   sqlite.pragma('journal_mode = WAL');
+  sqlite.pragma('busy_timeout = 5000');
   const db = drizzle({ client: sqlite, schema });
   migrate(db, { migrationsFolder });
   return { db, close: () => sqlite.close() };

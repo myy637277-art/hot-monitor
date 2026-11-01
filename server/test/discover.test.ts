@@ -6,7 +6,7 @@ import { resetAiGuard, type AiEnv } from '../src/ai/deepseek.ts';
 import { scoreStories } from '../src/ai/score.ts';
 import { runCollect } from '../src/collect/run.ts';
 import { listHomepage } from '../src/collect/store.ts';
-import { createInterest, listDiscoveries } from '../src/discover/interests.ts';
+import { createInterest, listDiscoveries, listDiscoveryFeed } from '../src/discover/interests.ts';
 import { createApp } from '../src/app.ts';
 import { interests, items, sources, stories, storyItems } from '../src/db/schema.ts';
 import type { Db } from '../src/db/index.ts';
@@ -88,14 +88,15 @@ describe('interest discovery', () => {
     const id = created.body.interest.id as string;
     const second = (await request(app).get('/api/v1/discover').expect(200)).body as DiscoverResponse;
     expect(second.interests.map((row) => row.label)).toEqual(['AI']);
-    expect(second.stories.map((row) => row.id)).toEqual(['lab']);
-    expect(second.stories[0]?.interestLabel).toBe('AI');
+    expect(second.stories).toEqual([]);
+    expect(second.holds.map((row) => row.storyId)).toEqual(['lab']);
+    expect(second.holds[0]?.status).toBe('pending');
     expect(listHomepage(db, 100, now, false).map((row) => row.id)).not.toContain('lab');
 
     await request(app).patch(`/api/v1/discover/${id}`).send({ label: '模型', terms: ['大模型'] }).expect(200);
     const renamed = (await request(app).get('/api/v1/discover').expect(200)).body as DiscoverResponse;
     expect(renamed.interests[0]?.label).toBe('模型');
-    expect(renamed.stories[0]?.interestLabel).toBe('模型');
+    expect(renamed.holds[0]?.label).toBe('模型');
 
     for (let i = 0; i < 40; i += 1) {
       addItem(db, {
@@ -188,6 +189,8 @@ describe('interest discovery', () => {
     expect(row?.summaryZh).toBe('实验室放出了新的检查点。');
     expect(row?.relevant).toBe(false);
     expect(listDiscoveries(db, now).map((story) => story.id)).toEqual(['lab']);
+    expect(listDiscoveryFeed(db, now).stories).toEqual([]);
+    expect(listDiscoveryFeed(db, now).holds.map((row) => row.storyId)).toEqual(['lab']);
     expect(listHomepage(db, 100, now, true)).toEqual([]);
   });
 
@@ -274,7 +277,9 @@ describe('interest discovery', () => {
     const stored = JSON.parse(row?.aliases ?? '{}') as Record<string, string[]>;
     expect(stored['光刻']).toEqual(['lithography', '半导体', 'semiconductor', 'wafer']);
     const found = (await request(app).get('/api/v1/discover').expect(200)).body as DiscoverResponse;
-    expect(found.stories.map((story) => story.id)).toEqual(['scan']);
+    expect(found.stories).toEqual([]);
+    expect(found.holds.map((story) => story.storyId)).toEqual(['scan']);
+    expect(found.holds[0]?.status).toBe('pending');
     await request(app).get('/api/v1/stories?limit=100').expect(200);
     expect(listHomepage(db, 100, now, false)).toEqual([]);
     expect(calls).toBe(1);
@@ -310,6 +315,8 @@ describe('interest discovery', () => {
     createInterest(db, '人工智能方向', ['计算机研究生方向'], now, { 计算机研究生方向: ['方向', '研究'] });
     const found = listDiscoveries(db, now);
     expect(found.map((story) => story.id).sort()).toEqual(['grad', 'machine', 'term', 'word']);
+    expect(listDiscoveryFeed(db, now).stories).toEqual([]);
+    expect(listDiscoveryFeed(db, now).holds.map((story) => story.storyId).sort()).toEqual(['grad', 'machine', 'term', 'word']);
     expect(found.find((story) => story.id === 'grad')?.interestLabel).toBe('人工智能方向');
     expect(found.find((story) => story.id === 'term')?.interestLabel).toBe('计算机研究生方向');
     expect(listHomepage(db, 100, now, false).map((row) => row.id)).toEqual([]);

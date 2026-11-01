@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import type { NotifyChannel } from '@hot/shared';
+import type { ClaimHold, NotifyChannel } from '@hot/shared';
 import { Agent } from '../components/agents/Agent.tsx';
 import { Badge, type Tone } from '../components/ui/Badge.tsx';
 import { Button } from '../components/ui/Button.tsx';
@@ -32,7 +32,7 @@ export function WatchPage() {
   return (
     <>
       <PageHeader code="02 WATCH" title="关键词监控">
-        添加关键词。下一次采集会搜索这个词。新故事的标题、摘要或片段里出现它（英文不区分大小写）会记一条通知，并在已配置时推送到微信。同一条故事不会重复提醒。暂停后再继续，从继续的时刻重新算。
+        添加关键词。下一次采集会搜索这个词。新故事对上之后先核对相关性和来源，通过才记通知并推送到微信。同一条故事不会重复提醒。暂停后再继续，从继续的时刻重新算。
       </PageHeader>
 
       <HudCard code="KEYWORDS" title="关键词" className="mb-4">
@@ -125,6 +125,45 @@ export function WatchPage() {
           </ul>
         )}
       </HudCard>
+      <HoldList holds={watches.data?.holds ?? []} />
+    </>
+  );
+}
+
+export function HoldList({ holds }: { holds: ClaimHold[] }) {
+  const waiting = holds.filter((hold) => hold.status === 'pending');
+  const rejected = holds.filter((hold) => hold.status === 'reject');
+  if (waiting.length === 0 && rejected.length === 0) return null;
+  return (
+    <>
+      {waiting.length > 0 && (
+        <HudCard code="WAIT" title="等待核对" className="mb-4">
+          <ul className="space-y-2">
+            {waiting.map((hold) => (
+              <li key={`${hold.label}:${hold.storyId}`} className="border border-line px-3 py-2">
+                <p className="font-medium">
+                  <StoryTitleLink title={hold.title} href={hold.url} />
+                </p>
+                <p className="mt-1 text-sm text-muted">{hold.reason}</p>
+              </li>
+            ))}
+          </ul>
+        </HudCard>
+      )}
+      {rejected.length > 0 && (
+        <HudCard code="HOLD" title="未通过">
+          <ul className="space-y-2">
+            {rejected.map((hold) => (
+              <li key={`${hold.label}:${hold.storyId}`} className="border border-line px-3 py-2">
+                <p className="font-medium">
+                  <StoryTitleLink title={hold.title} href={hold.url} />
+                </p>
+                <p className="mt-1 text-sm text-muted">{hold.reason}</p>
+              </li>
+            ))}
+          </ul>
+        </HudCard>
+      )}
     </>
   );
 }

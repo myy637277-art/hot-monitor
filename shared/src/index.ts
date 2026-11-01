@@ -38,6 +38,10 @@ export interface HotStory {
   eventTitle: string | null;
   /** One Chinese reason from the homepage judgment. */
   feedReason: string | null;
+  /** Homepage judgment. Null when this card was not judged. */
+  feedVerdict: 'reliable' | 'uncertain' | null;
+  /** Best visible source: 2 official domain, 1 known press, 0 otherwise. */
+  sourceStrength: number;
   /** Shown when the model cannot be called and the story only passed the authority rules. */
   unverified: boolean;
   /** Set after a collect when the story is new on the homepage or gained sources. */
@@ -127,10 +131,21 @@ export interface WatchNotification {
   url: string | null;
 }
 
+export interface ClaimHold {
+  storyId: string;
+  label: string;
+  title: string;
+  reason: string;
+  status: 'reject' | 'pending';
+  url: string | null;
+}
+
 export interface WatchesResponse {
   ok: true;
   watches: Watch[];
   notifications: WatchNotification[];
+  /** String matches that are not final results: rejected, or still waiting on the model. */
+  holds: ClaimHold[];
   /** Set after a collect whose active keywords matched nothing. */
   matchNote: string | null;
 }
@@ -215,4 +230,5 @@ export interface DiscoverResponse {
   ok: true;
   interests: Interest[];
   stories: DiscoverStory[];
+  holds: ClaimHold[];
 }

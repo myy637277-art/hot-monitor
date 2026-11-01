@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { EmbeddingNote, SourceRunStatus, SourceStatus, SourceType } from '@hot/shared';
-import { and, desc, eq, gte, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import type { Db } from '../db/index.ts';
-import { crawlBudget, fetchCache, items, jobRuns, searchState, sources, stories, storyItems, usageDaily } from '../db/schema.ts';
+import { aiCache, claimChecks, crawlBudget, fetchCache, items, jobRuns, notifications, searchState, sources, stories, storyItems, usageDaily } from '../db/schema.ts';
 import { buildCatalog, type CatalogEntry } from './catalog.ts';
 import { homepageCards, type HomeItem, type HomeRow } from './home.ts';
 import { bufferToFloats, floatsToBuffer } from './embed.ts';
@@ -218,12 +218,61 @@ export function ingestItems(db: Db, raws: RawItem[], now: Date, useEmbedding: bo
   }
 }
 
-export function recordAttempt(db: Db, attempt: Attempt, now: Date, useEmbedding: boolean): void {
+const AI_CACHE_MS = 30 * 24 * 60 * 60 * 1000;
+
+function chunkIds(ids: string[], size = 400): string[][] {
+  const out: string[][] = [];
+  for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
+  return out;
+}
+
+/** Drop expired fetch cache, model cache older than 30 days, and items outside the 14-day merge window. */
+export function pruneStorage(db: Db, now: Date): void {
+  const itemCutoff = new Date(now.getTime() - CANDIDATE_MS);
+  const aiCutoff = new Date(now.getTime() - AI_CACHE_MS);
+  db.transaction((tx) => {
+    const writer = tx as unknown as Db;
+    writer.delete(fetchCache).where(lt(fetchCache.expiresAt, now)).run();
+    writer.delete(aiCache).where(lt(aiCache.createdAt, aiCutoff)).run();
+    const oldIds = writer
+      .select({ id: items.id })
+      .from(items)
+      .where(lt(items.fetchedAt, itemCutoff))
+      .all()
+      .map((row) => row.id);
+    for (const group of chunkIds(oldIds)) {
+      writer.delete(storyItems).where(inArray(storyItems.itemId, group)).run();
+      writer.delete(items).where(inArray(items.id, group)).run();
+    }
+    writer
+      .delete(stories)
+      .where(
+        sql`${stories.id} not in (select story_id from story_items) and ${stories.id} not in (select story_id from notifications) and ${stories.id} not in (select story_id from claim_checks)`,
+      )
+      .run();
+  });
+}
+
+export function recordAttempt(
+  db: Db,
+  attempt: Attempt,
+  now: Date,
+  useEmbedding: boolean,
+  opts?: { touchSource?: boolean },
+): void {
+  const touchSource = opts?.touchSource !== false && attempt.error !== '已取消';
+  db.transaction((tx) => {
+    applyAttempt(tx as unknown as Db, attempt, now, useEmbedding, touchSource);
+  });
+}
+
+function applyAttempt(db: Db, attempt: Attempt, now: Date, useEmbedding: boolean, touchSource: boolean): void {
   const day = shanghaiDate(now);
   if (attempt.requests > 0) addBudgetUsed(db, attempt.sourceId, day, attempt.requests);
   if (attempt.requests > 0 || attempt.usageItems > 0) addCount(db, usageDaily, day, attempt.sourceId, attempt.requests, attempt.usageItems);
   if (attempt.pauseUntil) setPause(db, attempt.sourceId, now, attempt.pauseUntil, attempt.pauseReason ?? attempt.error ?? '暂停');
   if (attempt.items.length > 0) ingestItems(db, attempt.items, now, useEmbedding);
+  if (!touchSource) return;
 
   const status = attempt.status === 'cap' ? 'paused' : attempt.status;
   if (status === 'ok') {

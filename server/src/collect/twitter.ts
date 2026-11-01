@@ -59,7 +59,7 @@ export function keepXPost(
   return post.followers != null && post.followers >= X_MIN_FOLLOWERS;
 }
 
-async function lookupFollowers(net: Net, userName: string): Promise<number | null> {
+async function lookupFollowers(net: Net, userName: string, signal?: AbortSignal): Promise<number | null> {
   if (!net.twitterKey?.trim()) return null;
   const url = `https://api.twitterapi.io/twitter/user/info?userName=${encodeURIComponent(userName)}`;
   try {
@@ -67,6 +67,7 @@ async function lookupFollowers(net: Net, userName: string): Promise<number | nul
       timeoutMs: net.feedTimeoutMs,
       ua: net.ua,
       headers: { 'x-api-key': net.twitterKey },
+      signal,
     });
     if (!res.ok) return null;
     const json = JSON.parse(res.body) as { data?: { followers?: unknown } };
@@ -82,6 +83,7 @@ export async function selectXPosts(
   net: Net,
   posts: ParsedTweet[],
   trusted?: ReadonlySet<string>,
+  signal?: AbortSignal,
 ): Promise<{ items: RawItem[]; lookups: number }> {
   const resolved = posts.map((post) => ({ ...post }));
   const missing = new Map<string, number[]>();
@@ -97,8 +99,9 @@ export async function selectXPosts(
 
   let lookups = 0;
   for (const [handle, indexes] of missing) {
+    if (signal?.aborted) break;
     lookups += 1;
-    const followers = await lookupFollowers(net, handle);
+    const followers = await lookupFollowers(net, handle, signal);
     for (const index of indexes) {
       const post = resolved[index];
       if (post) post.followers = followers;

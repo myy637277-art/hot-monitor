@@ -6,6 +6,7 @@ import { Button } from '../components/ui/Button.tsx';
 import { HudCard } from '../components/ui/HudCard.tsx';
 import { PageHeader } from '../components/ui/PageHeader.tsx';
 import { useAddInterest, useDeleteInterest, useDigest, useDiscover, useUpdateInterest } from '../lib/feed.ts';
+import { HoldList } from './WatchPage.tsx';
 import { fmtDateTime } from '../lib/useHealth.ts';
 import type { DigestLog, DigestReason } from '@hot/shared';
 
@@ -71,6 +72,7 @@ export function DiscoverPage() {
   const [terms, setTerms] = useState<string[]>(['']);
   const [editing, setEditing] = useState<string | null>(null);
   const stories = discover.data?.stories ?? [];
+  const holds = discover.data?.holds ?? [];
   const directions = discover.data?.interests ?? [];
   const cleanTerms = terms.map((term) => term.trim()).filter(Boolean).slice(0, 5);
   const busy = add.isPending || update.isPending;
@@ -94,7 +96,7 @@ export function DiscoverPage() {
   return (
     <>
       <PageHeader code="04 DISCOVER" title="兴趣发现">
-        自己添加方向。每个方向写一个名称，再写最多 5 个搜索词。下一次采集会用这些词在现有来源里找近 7 天的故事。结果只在这一页。
+        自己添加方向。每个方向写一个名称，再写最多 5 个搜索词。对上的故事会核对相关性和来源，通过后才出现在这一页。
       </PageHeader>
 
       <HudCard code="DOMAINS" title="方向" className="mb-4">
@@ -190,7 +192,7 @@ export function DiscoverPage() {
         )}
       </HudCard>
 
-      {discover.data && directions.length > 0 && stories.length === 0 && (
+      {discover.data && directions.length > 0 && stories.length === 0 && holds.length === 0 && (
         <HudCard code="EMPTY" title="还没有新故事">
           <p className="text-sm text-muted">到首页点「立即采集」。近 7 天里对得上的故事会出现在这里。</p>
         </HudCard>
@@ -227,6 +229,7 @@ export function DiscoverPage() {
           </ul>
         </section>
       )}
+      <HoldList holds={holds} />
     </>
   );
 }

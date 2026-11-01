@@ -1,6 +1,6 @@
 import type { Db } from '../db/index.ts';
 import { RSS_FEEDS } from './catalog.ts';
-import { fetchUrl, isTimeout, isVerification } from './http.ts';
+import { fetchUrl, isAbort, isTimeout, isTooLarge, isVerification } from './http.ts';
 import { parseBilibili, parseFeed, parseGithub, parseHnItem, parseHnTop, parseTweets, parseWeibo } from './parse.ts';
 import { selectXPosts } from './twitter.ts';
 import { loadTrust } from '../trust.ts';
@@ -31,10 +31,16 @@ async function pull(
     parse: (body: string) => RawItem[];
     /** RSS/Atom sources: an HTML page with zero entries is a failed fetch, not an empty feed. */
     expectFeed?: boolean;
+    signal?: AbortSignal;
   },
 ): Promise<Attempt> {
   try {
-    const res = await fetchUrl(net.fetch, opts.url, { timeoutMs: opts.timeoutMs, ua: net.ua, headers: opts.headers });
+    const res = await fetchUrl(net.fetch, opts.url, {
+      timeoutMs: opts.timeoutMs,
+      ua: net.ua,
+      headers: opts.headers,
+      signal: opts.signal,
+    });
     if (isVerification(res.status, res.body)) return pauseForBlock(opts.sourceId, net.now(), '验证页或被拦截');
     if (!res.ok) return failedAttempt(opts.sourceId, 'error', `HTTP ${res.status}`, { requests: 1 });
     const items = opts.parse(res.body);
@@ -43,6 +49,8 @@ async function pull(
     }
     return okAttempt(opts.sourceId, items);
   } catch (err) {
+    if (isAbort(err)) return failedAttempt(opts.sourceId, 'skipped', '已取消');
+    if (isTooLarge(err)) return failedAttempt(opts.sourceId, 'error', '响应过大', { requests: 1 });
     if (isTimeout(err)) {
       const error = opts.onTimeout === 'skip' ? '超时，已跳过本轮' : '请求超时';
       return failedAttempt(opts.sourceId, opts.onTimeout === 'skip' ? 'skipped' : 'error', error, { requests: 1 });
@@ -51,7 +59,7 @@ async function pull(
   }
 }
 
-export function collectWeibo(net: Net): Promise<Attempt> {
+export function collectWeibo(net: Net, signal?: AbortSignal): Promise<Attempt> {
   return pull(net, {
     sourceId: 'weibo_hot',
     url: 'https://weibo.com/ajax/side/hotSearch',
@@ -59,10 +67,11 @@ export function collectWeibo(net: Net): Promise<Attempt> {
     headers: { Referer: 'https://weibo.com', 'X-Requested-With': 'XMLHttpRequest' },
     onTimeout: 'error',
     parse: parseWeibo,
+    signal,
   });
 }
 
-export function collectBilibili(net: Net): Promise<Attempt> {
+export function collectBilibili(net: Net, signal?: AbortSignal): Promise<Attempt> {
   return pull(net, {
     sourceId: 'bili_hot',
     url: 'https://api.bilibili.com/x/web-interface/popular?ps=20&pn=1',
@@ -70,15 +79,16 @@ export function collectBilibili(net: Net): Promise<Attempt> {
     headers: { Referer: 'https://www.bilibili.com' },
     onTimeout: 'error',
     parse: parseBilibili,
+    signal,
   });
 }
 
-export async function collectHn(net: Net): Promise<Attempt> {
+export async function collectHn(net: Net, signal?: AbortSignal): Promise<Attempt> {
   const started = Date.now();
   const left = () => net.hnTimeoutMs - (Date.now() - started);
   try {
     if (left() <= 0) return failedAttempt('hn', 'skipped', '超时，已跳过本轮');
-    const top = await fetchUrl(net.fetch, HN_TOP, { timeoutMs: Math.max(1, left()), ua: net.ua });
+    const top = await fetchUrl(net.fetch, HN_TOP, { timeoutMs: Math.max(1, left()), ua: net.ua, signal });
     if (isVerification(top.status, top.body)) return pauseForBlock('hn', net.now(), '验证页或被拦截');
     if (!top.ok) return failedAttempt('hn', 'error', `HTTP ${top.status}`, { requests: 1 });
     const ids = parseHnTop(top.body);
@@ -88,6 +98,7 @@ export async function collectHn(net: Net): Promise<Attempt> {
       const res = await fetchUrl(net.fetch, `https://hacker-news.firebaseio.com/v0/item/${id}.json`, {
         timeoutMs: Math.max(1, left()),
         ua: net.ua,
+        signal,
       });
       if (!res.ok) continue;
       const item = parseHnItem(res.body);
@@ -95,12 +106,14 @@ export async function collectHn(net: Net): Promise<Attempt> {
     }
     return okAttempt('hn', found);
   } catch (err) {
+    if (isAbort(err)) return failedAttempt('hn', 'skipped', '已取消');
+    if (isTooLarge(err)) return failedAttempt('hn', 'error', '响应过大', { requests: 1 });
     if (isTimeout(err)) return failedAttempt('hn', 'skipped', '超时，已跳过本轮', { requests: 1 });
     return failedAttempt('hn', 'error', err instanceof Error ? err.message : '请求失败');
   }
 }
 
-export function collectRssFeed(net: Net, feed: (typeof RSS_FEEDS)[number]): Promise<Attempt> {
+export function collectRssFeed(net: Net, feed: (typeof RSS_FEEDS)[number], signal?: AbortSignal): Promise<Attempt> {
   return pull(net, {
     sourceId: feed.id,
     url: feed.feedUrl,
@@ -108,6 +121,7 @@ export function collectRssFeed(net: Net, feed: (typeof RSS_FEEDS)[number]): Prom
     onTimeout: 'skip',
     expectFeed: true,
     parse: (body) => parseFeed(body, feed.id),
+    signal,
   });
 }
 
@@ -115,7 +129,7 @@ export function collectRss(net: Net): Promise<Attempt[]> {
   return Promise.all(RSS_FEEDS.map((feed) => collectRssFeed(net, feed)));
 }
 
-export function collectGithub(net: Net): Promise<Attempt> {
+export function collectGithub(net: Net, signal?: AbortSignal): Promise<Attempt> {
   const day = shanghaiDate(new Date(net.now().getTime() - 7 * 24 * 60 * 60 * 1000));
   const q = encodeURIComponent(`created:>${day} topic:llm`);
   return pull(net, {
@@ -125,16 +139,18 @@ export function collectGithub(net: Net): Promise<Attempt> {
     headers: { Accept: 'application/vnd.github+json' },
     onTimeout: 'skip',
     parse: parseGithub,
+    signal,
   });
 }
 
-export function collectArxiv(net: Net): Promise<Attempt> {
+export function collectArxiv(net: Net, signal?: AbortSignal): Promise<Attempt> {
   return pull(net, {
     sourceId: 'arxiv',
     url: ARXIV,
     timeoutMs: net.feedTimeoutMs,
     onTimeout: 'skip',
     parse: (body) => parseFeed(body, 'arxiv', 10),
+    signal,
   });
 }
 
@@ -149,7 +165,13 @@ function isCreditError(status: number, body: string): boolean {
   }
 }
 
-export async function collectTwitter(db: Db, net: Net, query = 'AI', windowMs = 24 * 60 * 60 * 1000): Promise<Attempt> {
+export async function collectTwitter(
+  db: Db,
+  net: Net,
+  query = 'AI',
+  windowMs = 24 * 60 * 60 * 1000,
+  signal?: AbortSignal,
+): Promise<Attempt> {
   if (!net.twitterKey?.trim()) return failedAttempt('twitter', 'unconfigured', '未配置 TWITTERAPI_IO_API_KEY');
   const pause = activePause(db, 'twitter', net.now());
   if (pause) return failedAttempt('twitter', 'paused', pause.reason ?? '暂停至明天', { pauseReason: pause.reason });
@@ -169,6 +191,7 @@ export async function collectTwitter(db: Db, net: Net, query = 'AI', windowMs = 
       timeoutMs: net.feedTimeoutMs,
       ua: net.ua,
       headers: { 'x-api-key': net.twitterKey },
+      signal,
     });
     if (isCreditError(res.status, res.body)) {
       const reason = '额度已用完';
@@ -183,13 +206,15 @@ export async function collectTwitter(db: Db, net: Net, query = 'AI', windowMs = 
     const cutoff = net.now().getTime() - windowMs;
     const drafts = parseTweets(res.body).filter((draft) => draft.item.publishedAt != null && draft.item.publishedAt.getTime() >= cutoff);
     const trusted = new Set(loadTrust(db).handles);
-    const selected = await selectXPosts(net, drafts, trusted);
+    const selected = await selectXPosts(net, drafts, trusted, signal);
     return {
       ...okAttempt('twitter', selected.items),
       requests: 1 + selected.lookups,
       usageItems: Math.max(drafts.length, 1),
     };
   } catch (err) {
+    if (isAbort(err)) return failedAttempt('twitter', 'skipped', '已取消', { requests: 1 });
+    if (isTooLarge(err)) return failedAttempt('twitter', 'error', '响应过大', { requests: 1 });
     if (isTimeout(err)) return failedAttempt('twitter', 'skipped', '超时，已跳过本轮', { requests: 1 });
     return failedAttempt('twitter', 'error', err instanceof Error ? err.message : '请求失败');
   }

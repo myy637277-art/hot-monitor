@@ -4,7 +4,15 @@ import { createApp } from '../src/app.ts';
 import { notifications, stories, watches } from '../src/db/schema.ts';
 import { listWatchState, matchWatches } from '../src/notify/watch.ts';
 import { serverchanEndpoint } from '../src/notify/serverchan.ts';
+import type { ClaimVerdict } from '../src/ai/claim.ts';
 import { memoryDb } from './helpers.ts';
+
+const passed = async (): Promise<ClaimVerdict> => ({
+  status: 'pass',
+  relevant: true,
+  authentic: true,
+  reason: '来源和主题都对得上',
+});
 
 const opened: Array<() => void> = [];
 afterEach(() => opened.splice(0).forEach((close) => close()));
@@ -51,8 +59,8 @@ describe('keyword watch', () => {
       return new Response(JSON.stringify({ code: 0 }), { status: 200 });
     };
 
-    expect(await matchWatches(database, { now, serverchanKey: 'SCT_unit_test', fetchImpl })).toBe(3);
-    expect(await matchWatches(database, { now, serverchanKey: 'SCT_unit_test', fetchImpl })).toBe(0);
+    expect(await matchWatches(database, { now, serverchanKey: 'SCT_unit_test', fetchImpl, verdict: passed })).toBe(3);
+    expect(await matchWatches(database, { now, serverchanKey: 'SCT_unit_test', fetchImpl, verdict: passed })).toBe(0);
     const rows = database.select().from(notifications).all();
     expect(rows.map((row) => row.storyId).sort()).toEqual(['english-only', 'title-hit', 'zh-hit']);
     expect(calls).toHaveLength(3);
@@ -72,7 +80,7 @@ describe('keyword watch', () => {
       called += 1;
       return new Response('nope', { status: 500 });
     };
-    expect(await matchWatches(database, { now, fetchImpl })).toBe(1);
+    expect(await matchWatches(database, { now, fetchImpl, verdict: passed })).toBe(1);
     expect(called).toBe(0);
     expect(database.select().from(notifications).all().map((row) => row.channel)).toEqual(['skipped']);
   });
@@ -98,7 +106,7 @@ describe('keyword watch', () => {
     story(database, { id: 'ds', title: '模型发布', summary: 'DeepSeek released a checkpoint', summaryZh: '一条科技消息', createdAt: now });
     story(database, { id: 'other', title: 'OpenAI note', summary: 'unrelated', summaryZh: '别的事情', createdAt: now });
     const fetchImpl: typeof fetch = async () => new Response(JSON.stringify({ code: 0 }), { status: 200 });
-    expect(await matchWatches(database, { now, serverchanKey: 'SCT_unit_test', fetchImpl })).toBe(1);
+    expect(await matchWatches(database, { now, serverchanKey: 'SCT_unit_test', fetchImpl, verdict: passed })).toBe(1);
     expect(database.select().from(notifications).all().map((row) => row.storyId)).toEqual(['ds']);
     expect(listWatchState(database).matchNote).toBeNull();
   });
@@ -110,7 +118,7 @@ describe('keyword watch', () => {
     database.insert(watches).values({ id: '55555555-5555-4555-8555-555555555555', keyword: '灵眸', paused: false, since, createdAt: since }).run();
     story(database, { id: 'one', title: '灵眸', createdAt: now });
     const fetchImpl: typeof fetch = async () => new Response('nope', { status: 503 });
-    expect(await matchWatches(database, { now, serverchanKey: 'SCT_unit_test', fetchImpl })).toBe(1);
+    expect(await matchWatches(database, { now, serverchanKey: 'SCT_unit_test', fetchImpl, verdict: passed })).toBe(1);
     const row = database.select().from(notifications).all()[0];
     expect(row?.channel).toBe('failed');
     expect(row?.httpStatus).toBe(503);
@@ -128,6 +136,33 @@ describe('keyword watch', () => {
     const fetchImpl: typeof fetch = async () => new Response('nope', { status: 500 });
     expect(await matchWatches(database, { now, serverchanKey: 'SCT_unit_test', fetchImpl })).toBe(0);
     expect(listWatchState(database).matchNote).toBe('这次采集没有命中关键词。');
+  });
+
+  it('keeps a rejected or unchecked keyword match out of WeChat', async () => {
+    const database = db();
+    const since = new Date('2026-10-26T00:00:00Z');
+    const now = new Date('2026-10-26T01:00:00Z');
+    database.insert(watches).values({ id: '77777777-7777-4777-8777-777777777777', keyword: '灵眸', paused: false, since, createdAt: since }).run();
+    story(database, { id: 'nope', title: '灵眸只是顺带出现', createdAt: now });
+    story(database, { id: 'wait', title: '灵眸还没核对', createdAt: now });
+    const fetchImpl: typeof fetch = async () => {
+      throw new Error('wechat should not be called');
+    };
+    expect(
+      await matchWatches(database, {
+        now,
+        serverchanKey: 'SCT_unit_test',
+        fetchImpl,
+        verdict: async (input) =>
+          input.title.includes('还没')
+            ? { status: 'pending', relevant: null, authentic: null, reason: '等待核对' }
+            : { status: 'reject', relevant: false, authentic: true, reason: '只是顺带提到' },
+      }),
+    ).toBe(0);
+    expect(database.select().from(notifications).all()).toEqual([]);
+    const holds = listWatchState(database).holds;
+    expect(holds.map((row) => row.status).sort()).toEqual(['pending', 'reject']);
+    expect(holds.find((row) => row.storyId === 'nope')?.reason).toBe('只是顺带提到');
   });
 
   it('builds the Turbo and Server酱³ endpoints without sending', () => {

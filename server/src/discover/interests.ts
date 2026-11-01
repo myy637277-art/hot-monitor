@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import type { DiscoverStory, Interest } from '@hot/shared';
-import { desc, eq } from 'drizzle-orm';
+import type { ClaimHold, DiscoverStory, Interest } from '@hot/shared';
+import { and, desc, eq } from 'drizzle-orm';
+import { CLAIM_WAIT, claimRows, judgeClaim, writeClaim } from '../ai/claim.ts';
+import type { AiEnv } from '../ai/deepseek.ts';
 import { hasHan } from '../ai/formula.ts';
-import { HOME_WINDOW_MS, type HomeItem, type HomeRow } from '../collect/home.ts';
+import { HOME_WINDOW_MS, bestSourceStrength, type HomeItem, type HomeRow } from '../collect/home.ts';
 import { loadHomeRows } from '../collect/store.ts';
 import type { Db } from '../db/index.ts';
-import { interests } from '../db/schema.ts';
+import { claimChecks, interests, jobRuns } from '../db/schema.ts';
 import { clipAliasMap } from './aliases.ts';
 
 const DIRECTION_CAP = 20;
@@ -151,6 +153,7 @@ export function updateInterest(
 export function deleteInterest(db: Db, id: string): boolean {
   const row = db.select().from(interests).where(eq(interests.id, id)).get();
   if (!row) return false;
+  db.delete(claimChecks).where(and(eq(claimChecks.kind, 'interest'), eq(claimChecks.ownerId, id))).run();
   db.delete(interests).where(eq(interests.id, id)).run();
   return true;
 }
@@ -234,6 +237,8 @@ function toStory(row: HomeRow, items: HomeItem[], interestLabel: string): Discov
     publishedAt: published > 0 ? new Date(published).toISOString() : null,
     eventTitle,
     feedReason: row.feedReason,
+    feedVerdict: row.feedVerdict === 'reliable' || row.feedVerdict === 'uncertain' ? row.feedVerdict : null,
+    sourceStrength: bestSourceStrength(items),
     unverified: row.aiMode !== 'model',
     feedBadge: row.feedBadge,
     sources,
@@ -241,11 +246,18 @@ function toStory(row: HomeRow, items: HomeItem[], interestLabel: string): Discov
   };
 }
 
-export function listDiscoveries(db: Db, now: Date): DiscoverStory[] {
+interface DiscoveryHit {
+  story: DiscoverStory;
+  interestId: string;
+  urls: string[];
+  summary: string;
+}
+
+function discoveryHits(db: Db, now: Date): DiscoveryHit[] {
   const active = listDirections(db);
   if (active.length === 0) return [];
   const cutoff = now.getTime() - HOME_WINDOW_MS;
-  const cards: Array<{ story: DiscoverStory; at: number }> = [];
+  const cards: Array<DiscoveryHit & { at: number }> = [];
   for (const row of loadHomeRows(db)) {
     const visible = row.items.filter((item) => !BLOCKED.has(item.sourceType));
     const fresh = visible.filter((item) => item.publishedAt != null && item.publishedAt.getTime() >= cutoff);
@@ -256,8 +268,78 @@ export function listDiscoveries(db: Db, now: Date): DiscoverStory[] {
     );
     if (!hit) continue;
     const at = Math.max(...fresh.map((item) => item.publishedAt?.getTime() ?? 0));
-    cards.push({ story: toStory(row, fresh, hit.label), at });
+    const urls = fresh.map((item) => item.url).filter((url): url is string => Boolean(url && /^https?:\/\//i.test(url)));
+    cards.push({
+      story: toStory(row, fresh, hit.label),
+      interestId: hit.id,
+      urls,
+      summary: row.summaryZh ?? row.summary ?? '',
+      at,
+    });
   }
   cards.sort((a, b) => b.at - a.at);
-  return cards.slice(0, DISCOVER_CAP).map((card) => card.story);
+  return cards.slice(0, DISCOVER_CAP);
+}
+
+export function listDiscoveries(db: Db, now: Date): DiscoverStory[] {
+  return discoveryHits(db, now).map((hit) => hit.story);
+}
+
+const SHOWN_BEFORE = '升级前已对上';
+const SEED_JOB = 'claim-seed';
+
+/** One-time pass for interest matches that were already on screen before checks existed. */
+export function seedShownClaims(db: Db, now: Date): void {
+  const seeded = db.select().from(jobRuns).where(eq(jobRuns.name, SEED_JOB)).get();
+  if (seeded) return;
+  for (const hit of discoveryHits(db, now)) {
+    writeClaim(db, {
+      kind: 'interest',
+      ownerId: hit.interestId,
+      storyId: hit.story.id,
+      verdict: { status: 'pass', relevant: null, authentic: null, reason: SHOWN_BEFORE },
+      at: now,
+    });
+  }
+  db.insert(jobRuns).values({ name: SEED_JOB, lastRunAt: now, runCount: 1, lastError: null }).run();
+}
+
+export async function reviewInterests(db: Db, env: AiEnv, now: Date, signal?: AbortSignal): Promise<void> {
+  const saved = new Map(claimRows(db, 'interest').map((row) => [`${row.ownerId}:${row.storyId}`, row]));
+  for (const hit of discoveryHits(db, now)) {
+    if (signal?.aborted) return;
+    const existing = saved.get(`${hit.interestId}:${hit.story.id}`);
+    if (existing && existing.status !== 'pending') continue;
+    const verdict = await judgeClaim(db, env, {
+      label: hit.story.interestLabel,
+      title: hit.story.eventTitle ?? hit.story.title,
+      summary: hit.summary,
+      urls: hit.urls,
+    });
+    writeClaim(db, { kind: 'interest', ownerId: hit.interestId, storyId: hit.story.id, verdict, at: now });
+  }
+}
+
+export function listDiscoveryFeed(db: Db, now: Date): { stories: DiscoverStory[]; holds: ClaimHold[] } {
+  const saved = new Map(claimRows(db, 'interest').map((row) => [`${row.ownerId}:${row.storyId}`, row]));
+  const stories: DiscoverStory[] = [];
+  const holds: ClaimHold[] = [];
+  for (const hit of discoveryHits(db, now)) {
+    const check = saved.get(`${hit.interestId}:${hit.story.id}`);
+    const url = hit.story.sources.map((source) => source.url).find((item) => item && /^https?:\/\//i.test(item)) ?? null;
+    if (check?.status === 'pass') {
+      stories.push(hit.story);
+      continue;
+    }
+    const status = check?.status === 'reject' ? 'reject' : 'pending';
+    holds.push({
+      storyId: hit.story.id,
+      label: hit.story.interestLabel,
+      title: hit.story.eventTitle ?? hit.story.title,
+      reason: check?.reason ?? CLAIM_WAIT,
+      status,
+      url,
+    });
+  }
+  return { stories, holds };
 }

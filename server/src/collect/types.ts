@@ -1,7 +1,8 @@
 export interface Net {
   fetch: typeof fetch;
   now: () => Date;
-  sleep: (ms: number) => Promise<void>;
+  /** Optional signal cancels the wait. Callers that ignore it still type-check. */
+  sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   ua: string;
   /** Extra delay added to the 90s search gap. Production uses 0–30s; tests use 0. */
   jitterMs: () => number;

@@ -95,7 +95,7 @@ export function homepageCards(rows: HomeRow[], now: Date, modelOpen: boolean, ex
   ready.sort((a, b) => {
     const agree = sourceCount(b.items) - sourceCount(a.items);
     if (agree !== 0) return agree;
-    const strength = bestStrength(b.items) - bestStrength(a.items);
+    const strength = bestSourceStrength(b.items) - bestSourceStrength(a.items);
     if (strength !== 0) return strength;
     return newest(b.items) - newest(a.items);
   });
@@ -126,7 +126,7 @@ function sourceCount(items: HomeItem[]): number {
   return new Set(items.map((item) => item.sourceId)).size;
 }
 
-function bestStrength(items: HomeItem[]): number {
+export function bestSourceStrength(items: HomeItem[]): number {
   return items.reduce((max, item) => {
     const host = item.url ? hostOf(item.url) : null;
     return Math.max(max, host ? sourceStrength(host) : 0);
@@ -167,6 +167,8 @@ function toCard(row: HomeRow, items: HomeItem[], unverified: boolean): HotStory 
     publishedAt: published > 0 ? new Date(published).toISOString() : null,
     eventTitle,
     feedReason: unverified ? null : row.feedReason,
+    feedVerdict: row.feedVerdict === 'reliable' || row.feedVerdict === 'uncertain' ? row.feedVerdict : null,
+    sourceStrength: bestSourceStrength(items),
     unverified,
     feedBadge: row.feedBadge,
     sources,

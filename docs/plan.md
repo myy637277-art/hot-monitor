@@ -31,4 +31,4 @@ DeepSeek 把每条候选判成 reliable、uncertain 或 unreliable，并给一�
 | M0 | 已验收 |
 | M1–M4 | 2026-10-26 已完成并验证，等验收。M3 当时走 OpenRouter 免费模型，这一路已经换成 DeepSeek |
 | 关键词搜索、来源链接、失败原因 | 已接在 M4 上：关键词会进搜狗或 DuckDuckGo 和 twitterapi.io；卡片链接到来源；模型失败会写出具体原因，而不是盖掉已有摘要 |
-| M5 及以后 | 日报在设置页，到点先采集再推。发现页由用户自建方向。邮件按确认不做。后续范围见 `docs/improvement.md` |
+| M5 及以后 | 日报在设置页，到点先采主源再推，词搜在推送之后。发现页由用户自建方向。邮件按确认不做。后续范围见 `docs/improvement.md` |

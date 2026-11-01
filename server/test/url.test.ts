@@ -14,6 +14,7 @@ describe('URL normalization', () => {
     expect(dedupeKeyForUrl('https://x.com/someone/status/99?s=20')).toBe(twitterDedupeKey('99'));
     expect(dedupeKeyForUrl('https://twitter.com/someone/status/99')).toBe('twitter:99');
     expect(dedupeKeyForUrl('https://www.bilibili.com/video/BV1xx411c7mD/?spm_id_from=333')).toBe(biliDedupeKey('BV1xx411c7mD'));
+    expect(dedupeKeyForUrl('https://example.com/video/BV1xx411c7mD')).toBe('url:https://example.com/video/BV1xx411c7mD');
   });
 
   it('normalizes a weibo hot word', () => {

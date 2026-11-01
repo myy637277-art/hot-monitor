@@ -93,11 +93,11 @@ export function withAiLock(job: () => Promise<void>): Promise<void> {
   });
 }
 
-export function scoreStories(db: Db, env: AiEnv): Promise<void> {
-  return withAiLock(() => scoreNow(db, env));
+export function scoreStories(db: Db, env: AiEnv, signal?: AbortSignal): Promise<void> {
+  return withAiLock(() => scoreNow(db, env, signal));
 }
 
-async function scoreNow(db: Db, env: AiEnv): Promise<void> {
+async function scoreNow(db: Db, env: AiEnv, signal?: AbortSignal): Promise<void> {
   seedReputation(db);
   const fresh = db
     .select()
@@ -204,7 +204,7 @@ async function scoreNow(db: Db, env: AiEnv): Promise<void> {
 
   if (keyed && targets.length > 0) {
     for (const batch of chunks(targets, ANALYSIS_BATCH)) {
-      if (halted) break;
+      if (halted || signal?.aborted) break;
       const parsed = await completeJson(db, env, analysisPrompt(batch));
       if (!parsed) break;
       if (parsed.failure) {

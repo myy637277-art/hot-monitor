@@ -9,7 +9,7 @@ import type { Net } from './collect/types.ts';
 import { integrationStatus } from './config.ts';
 import type { Db } from './db/index.ts';
 import { aliasesForTerms } from './discover/aliases.ts';
-import { createInterest, deleteInterest, listDiscoveries, listInterests, peekInterest, updateInterest } from './discover/interests.ts';
+import { createInterest, deleteInterest, listDiscoveryFeed, listInterests, peekInterest, updateInterest } from './discover/interests.ts';
 import { deliverDigest, listDigestLogs, readDigest, saveDigest } from './notify/digest.ts';
 import { createWatch, deleteWatch, listWatchState, setWatchPaused } from './notify/watch.ts';
 import { addTrusted, deleteTrusted, listTrusted } from './trust.ts';
@@ -184,7 +184,8 @@ export function createApp(
 
   app.get('/api/v1/discover', (_req, res) => {
     const now = opts.net?.now() ?? new Date();
-    const body: DiscoverResponse = { ok: true, interests: listInterests(db), stories: listDiscoveries(db, now) };
+    const found = listDiscoveryFeed(db, now);
+    const body: DiscoverResponse = { ok: true, interests: listInterests(db), stories: found.stories, holds: found.holds };
     res.json(body);
   });
 

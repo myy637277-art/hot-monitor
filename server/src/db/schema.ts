@@ -60,7 +60,7 @@ export const stories = sqliteTable(
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },
-  (t) => [index('stories_updated_idx').on(t.updatedAt)],
+  (t) => [index('stories_updated_idx').on(t.updatedAt), index('stories_created_idx').on(t.createdAt)],
 );
 
 export const storyItems = sqliteTable(
@@ -152,6 +152,22 @@ export const trustedSources = sqliteTable(
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
   },
   (t) => [uniqueIndex('trusted_sources_kind_value').on(t.kind, t.value)],
+);
+
+export const claimChecks = sqliteTable(
+  'claim_checks',
+  {
+    id: text('id').primaryKey(),
+    kind: text('kind').notNull(),
+    ownerId: text('owner_id').notNull(),
+    storyId: text('story_id').notNull(),
+    status: text('status').notNull(),
+    relevant: integer('relevant', { mode: 'boolean' }),
+    authentic: integer('authentic', { mode: 'boolean' }),
+    reason: text('reason').notNull(),
+    judgedAt: integer('judged_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (t) => [uniqueIndex('claim_checks_owner').on(t.kind, t.ownerId, t.storyId)],
 );
 
 export const watches = sqliteTable('watches', {

@@ -11,17 +11,17 @@ import { withAiLock } from './score.ts';
 const BATCH = 4;
 const VERDICTS = new Set(['reliable', 'uncertain', 'unreliable']);
 
-export function judgeHomepage(db: Db, env: AiEnv): Promise<void> {
-  return withAiLock(() => judgeNow(db, env));
+export function judgeHomepage(db: Db, env: AiEnv, signal?: AbortSignal): Promise<void> {
+  return withAiLock(() => judgeNow(db, env, signal));
 }
 
-async function judgeNow(db: Db, env: AiEnv): Promise<void> {
+async function judgeNow(db: Db, env: AiEnv, signal?: AbortSignal): Promise<void> {
   if (!hasAiKey(env)) return;
   const pending = rowsToJudge(loadHomeRows(db), env.now(), loadTrust(db).domains);
   if (pending.length === 0) return;
   let halted = false;
   for (const batch of chunks(pending, BATCH)) {
-    if (halted) break;
+    if (halted || signal?.aborted) break;
     const parsed = await completeJson(db, env, verdictPrompt(batch));
     if (!parsed || parsed.failure) break;
     const got = readVerdicts(parsed.json);
